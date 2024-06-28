@@ -188,28 +188,54 @@
                     });
 
                     socket.on('offer', async (sdp) => {
-                        await peerConnection.setRemoteDescription(new RTCSessionDescription(sdp));
-                        const answer = await peerConnection.createAnswer();
-                        await peerConnection.setLocalDescription(answer);
-                        socket.emit('answer', { roomId, sdp: answer });
+                        if (peerConnection.signalingState !== 'stable') {
+                            console.warn('Signaling state not stable, cannot handle offer.');
+                            return;
+                        }
+                        try {
+                            await peerConnection.setRemoteDescription(new RTCSessionDescription(sdp));
+                            const answer = await peerConnection.createAnswer();
+                            await peerConnection.setLocalDescription(answer);
+                            socket.emit('answer', { roomId, sdp: answer });
+                        } catch (err) {
+                            console.error('Error handling offer: ', err);
+                        }
                     });
 
                     socket.on('answer', async (sdp) => {
-                        await peerConnection.setRemoteDescription(new RTCSessionDescription(sdp));
+                        if (peerConnection.signalingState !== 'have-local-offer') {
+                            console.warn('Signaling state not "have-local-offer", cannot handle answer.');
+                            return;
+                        }
+                        try {
+                            await peerConnection.setRemoteDescription(new RTCSessionDescription(sdp));
+                        } catch (err) {
+                            console.error('Error handling answer: ', err);
+                        }
                     });
 
                     socket.on('candidate', async (candidate) => {
-                        await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+                        try {
+                            await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+                        } catch (err) {
+                            console.error('Error adding received ICE candidate', err);
+                        }
                     });
 
                     createOffer(roomId);
+                }).catch(error => {
+                    console.error('Error accessing media devices: ', error);
                 });
         };
 
         const createOffer = async (roomId) => {
-            const offer = await peerConnection.createOffer();
-            await peerConnection.setLocalDescription(offer);
-            socket.emit('offer', { roomId, sdp: offer });
+            try {
+                const offer = await peerConnection.createOffer();
+                await peerConnection.setLocalDescription(offer);
+                socket.emit('offer', { roomId, sdp: offer });
+            } catch (err) {
+                console.error('Error creating offer: ', err);
+            }
         };
 
         window.onload = () => {

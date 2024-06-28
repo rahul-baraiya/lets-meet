@@ -149,7 +149,7 @@
 
         generateLinkButton.onclick = () => {
             const roomId = Math.random().toString(36).substring(2, 15);
-            const link = `${window.location.origin}?roomId=${roomId}`;
+            const link = `${window.location.origin}/lets-meet?roomId=${roomId}`;
             roomIdInput.value = roomId;
             roomLink.textContent = link;
             roomLink.setAttribute('data-link', link);

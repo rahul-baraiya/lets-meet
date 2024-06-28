@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video Call</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f0f0f0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+        }
+
+        #container {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+            width: 90%;
+            max-width: 800px;
+            text-align: center;
+        }
+
+        #controls,
+        #callControls {
+            margin-bottom: 20px;
+        }
+
+        #controls input,
+        #controls button,
+        #callControls button {
+            padding: 10px;
+            margin: 5px;
+            border-radius: 5px;
+            border: 1px solid #ccc;
+            font-size: 16px;
+        }
+
+        #controls button,
+        #callControls button {
+            background-color: #007bff;
+            color: white;
+            cursor: pointer;
+        }
+
+        #controls button:hover,
+        #callControls button:hover {
+            background-color: #0056b3;
+        }
+
+        #link {
+            display: none;
+            margin-top: 10px;
+            font-size: 14px;
+            color: #555;
+        }
+
+        #copyButton {
+            background-color: #28a745;
+            color: white;
+            cursor: pointer;
+            border: none;
+            padding: 5px 10px;
+            margin-left: 10px;
+            border-radius: 5px;
+        }
+
+        #copyButton:hover {
+            background-color: #218838;
+        }
+
+        video {
+            width: 45%;
+            max-width: 400px;
+            border: 1px solid #ccc;
+            margin: 10px;
+            border-radius: 10px;
+        }
+
+        #callControls {
+            display: flex;
+            justify-content: center;
+        }
+
+        .off {
+            background-color: #dc3545;
+        }
+
+        .off:hover {
+            background-color: #c82333;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="container">
+        <h1>Video Call</h1>
+        <div id="controls">
+            <input id="roomId" type="text" placeholder="Enter Room ID or generate new">
+            <button id="generateLink">Generate Link</button>
+        </div>
+        <div id="link">
+            Share this link to join the room:
+            <span id="roomLink"></span>
+            <button id="copyButton">Copy</button>
+        </div>
+        <div>
+            <video id="localVideo" autoplay playsinline></video>
+            <video id="remoteVideo" autoplay playsinline></video>
+        </div>
+        <div id="callControls">
+            <button id="toggleMute">Mute</button>
+            <button id="toggleVideo">Turn Off Camera</button>
+            <button id="endCall" class="off">End Call</button>
+        </div>
+    </div>
+
+    <!-- Include Socket.io client library from CDN -->
+    <script src="https://cdn.socket.io/4.0.1/socket.io.min.js"></script>
+    <script>
+        const socket = io('http://localhost:3000');
+        const roomIdInput = document.getElementById('roomId');
+        const generateLinkButton = document.getElementById('generateLink');
+        const localVideo = document.getElementById('localVideo');
+        const remoteVideo = document.getElementById('remoteVideo');
+        const linkDiv = document.getElementById('link');
+        const roomLink = document.getElementById('roomLink');
+        const copyButton = document.getElementById('copyButton');
+        const toggleMuteButton = document.getElementById('toggleMute');
+        const toggleVideoButton = document.getElementById('toggleVideo');
+        const endCallButton = document.getElementById('endCall');
+
+        let localStream;
+        let peerConnection;
+        let isMuted = false;
+        let isVideoOff = false;
+
+        const servers = {
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' }
+            ]
+        };
+
+        generateLinkButton.onclick = () => {
+            const roomId = Math.random().toString(36).substring(2, 15);
+            const link = `${window.location.origin}?roomId=${roomId}`;
+            roomIdInput.value = roomId;
+            roomLink.textContent = link;
+            roomLink.setAttribute('data-link', link);
+            linkDiv.style.display = 'block';
+            joinRoom(roomId);
+        };
+
+        copyButton.onclick = () => {
+            const link = roomLink.getAttribute('data-link');
+            navigator.clipboard.writeText(link).then(() => {
+                alert('Link copied to clipboard');
+            });
+        };
+
+        const joinRoom = (roomId) => {
+            socket.emit('join', roomId);
+
+            navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+                .then(stream => {
+                    localStream = stream;
+                    localVideo.srcObject = stream;
+                    peerConnection = new RTCPeerConnection(servers);
+
+                    peerConnection.onicecandidate = event => {
+                        if (event.candidate) {
+                            socket.emit('candidate', { roomId, candidate: event.candidate });
+                        }
+                    };
+
+                    peerConnection.ontrack = event => {
+                        remoteVideo.srcObject = event.streams[0];
+                    };
+
+                    localStream.getTracks().forEach(track => {
+                        peerConnection.addTrack(track, localStream);
+                    });
+
+                    socket.on('offer', async (sdp) => {
+                        await peerConnection.setRemoteDescription(new RTCSessionDescription(sdp));
+                        const answer = await peerConnection.createAnswer();
+                        await peerConnection.setLocalDescription(answer);
+                        socket.emit('answer', { roomId, sdp: answer });
+                    });
+
+                    socket.on('answer', async (sdp) => {
+                        await peerConnection.setRemoteDescription(new RTCSessionDescription(sdp));
+                    });
+
+                    socket.on('candidate', async (candidate) => {
+                        await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+                    });
+
+                    createOffer(roomId);
+                });
+        };
+
+        const createOffer = async (roomId) => {
+            const offer = await peerConnection.createOffer();
+            await peerConnection.setLocalDescription(offer);
+            socket.emit('offer', { roomId, sdp: offer });
+        };
+
+        window.onload = () => {
+            const urlParams = new URLSearchParams(window.location.search);
+            const roomId = urlParams.get('roomId');
+            if (roomId) {
+                roomIdInput.value = roomId;
+                joinRoom(roomId);
+            }
+        };
+
+        toggleMuteButton.onclick = () => {
+            isMuted = !isMuted;
+            localStream.getAudioTracks()[0].enabled = !isMuted;
+            toggleMuteButton.textContent = isMuted ? 'Unmute' : 'Mute';
+        };
+
+        toggleVideoButton.onclick = () => {
+            isVideoOff = !isVideoOff;
+            localStream.getVideoTracks()[0].enabled = !isVideoOff;
+            toggleVideoButton.textContent = isVideoOff ? 'Turn On Camera' : 'Turn Off Camera';
+        };
+
+        endCallButton.onclick = () => {
+            peerConnection.close();
+            socket.emit('leave', roomIdInput.value);
+            window.location.reload();
+        };
+
+        socket.on('userLeft', () => {
+            alert('The other user has left the call.');
+            window.location.reload();
+        });
+    </script>
+</body>
+
+</html>
